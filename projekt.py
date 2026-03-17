@@ -1,66 +1,77 @@
-import re
 import huggingface_hub
-
-# Our trusty monkey patch to keep the pipeline happy
+# Our trusty monkey patch
 huggingface_hub.cached_download = huggingface_hub.hf_hub_download
 
 import mindspore as ms
 import mindnlp
 from transformers import pipeline
+from datasets import load_dataset
 
-print("Loading BERT... (This might take a moment on the CPU)")
-# Initialize the fill-mask pipeline
+print("Initializing CogniBridge AI... (Loading dataset and model)")
+
+# 1. Load the dataset and set up our examples ONCE at the start of the script
+dataset = load_dataset("waboucay/wikilarge", 'original', split="train")
+
+ex1_complex = dataset[0]['complex']
+ex1_simple = dataset[0]['simple']
+
+ex2_complex = dataset[1]['complex']
+ex2_simple = dataset[1]['simple']
+
+ex3_complex = dataset[2]['complex']
+ex3_simple = dataset[2]['simple']
+
+# 2. Load the Qwen model ONCE into your Mac's CPU memory
 pipe = pipeline(
-    "fill-mask", 
-    model="bert-base-uncased", 
-    torch_dtype=ms.float32  # Keeping your Mac CPU safe!
+    "text-generation", 
+    model="Qwen/Qwen2-0.5B-Instruct", 
+    dtype=ms.float32  
 )
 
-def simplify_sentence_with_bert(sentence, threshold_length=7):
-    # 1. Split the sentence into words and punctuation
-    tokens = re.findall(r'\b\w+\b|[.,!?;]', sentence)
-    simplified_tokens = []
+print("CogniBridge is ready!\n")
 
-    for i, token in enumerate(tokens):
-        # 2. If the word is long enough, mask it and ask BERT for help
-        if token.isalpha() and len(token) >= threshold_length:
-            
-            # Create a temporary copy of the sentence with the [MASK] token
-            temp_tokens = tokens.copy()
-            temp_tokens[i] = "[MASK]"
-            
-            # Rebuild the sentence as a string to feed into BERT
-            masked_sentence = " ".join(temp_tokens).replace(" ,", ",").replace(" .", ".")
-            
-            # Ask BERT for the top 5 predictions
-            predictions = pipe(masked_sentence, top_k=5)
-            
-            # 3. Pick the best prediction that ISN'T the original word
-            best_replacement = token 
-            for pred in predictions:
-                candidate = pred['token_str'].strip()
-                
-                # Make sure BERT doesn't just suggest the exact same word again
-                if candidate.lower() != token.lower() and candidate.isalpha():
-                    best_replacement = candidate
-                    break  # Stop at the first good, different word
-            
-            simplified_tokens.append(best_replacement)
-            print(f"Replaced '{token}' -> '{best_replacement}'")
-        else:
-            # If it's a short word or punctuation, leave it alone
-            simplified_tokens.append(token)
+# 3. Define your custom function
+def cognibridge_simplify(sentence):
+    """
+    Takes a complex string, feeds it through Qwen with WikiLarge examples,
+    and returns only the simplified sentence.
+    """
+    prompt = f"""You are an expert at simplifying complex English. Look at these examples of complex sentences being rewritten into simple sentences.
 
-    # 4. Stitch the final sentence back together
-    final_sentence = " ".join(simplified_tokens).replace(" ,", ",").replace(" .", ".")
-    return final_sentence
+Complex: {ex1_complex}
+Simple: {ex1_simple}
 
-# Let's test it out!
-original_text = "The physician will ameliorate the excruciating discomfort."
+Complex: {ex2_complex}
+Simple: {ex2_simple}
 
-print("\n--- Starting Simplification ---")
-print(f"Original: {original_text}")
+Complex: {ex3_complex}
+Simple: {ex3_simple}
 
-simplified_text = simplify_sentence_with_bert(original_text)
+Now, simplify this sentence using the same style. ONLY output the simplified sentence. Do not add any explanations, notes, or extra text.
+Complex: {sentence}
+Simple:"""
 
-print(f"\nFinal Result: {simplified_text}")
+    # Generate the text
+    result = pipe(
+        prompt, 
+        max_new_tokens=50,      
+        return_full_text=False, 
+        temperature=0.1       
+    )
+
+    # Grab the raw text and aggressively chop off any AI "yapping"
+    raw_output = result[0]["generated_text"].strip()
+    clean_simplified_sentence = raw_output.split('\n')[0].strip()
+    
+    return clean_simplified_sentence
+
+# --- Testing the function ---
+if __name__ == "__main__":
+    test_sentence_1 = "The utilization of this technological apparatus will fundamentally ameliorate the efficiency of our daily operational paradigms."
+    test_sentence_2 = "The physician recommended that the patient consume an abundance of hydration to expedite the recuperation process."
+    
+    print("Test 1 Original:", test_sentence_1)
+    print("Test 1 Simplified:", cognibridge_simplify(test_sentence_1))
+    print("-" * 40)
+    print("Test 2 Original:", test_sentence_2)
+    print("Test 2 Simplified:", cognibridge_simplify(test_sentence_2))
