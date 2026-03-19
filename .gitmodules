@@ -1,0 +1,3 @@
+[submodule "mindocr"]
+	path = mindocr
+	url = https://github.com/mindspore-lab/mindocr
