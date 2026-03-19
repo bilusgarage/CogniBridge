@@ -1,5 +1,9 @@
 import os
+import subprocess
 import huggingface_hub
+import json                 # for parsing the MindOCR JSON output and extracting the transcription values before handing the text over to Qwen
+
+# Our trusty monkey patch
 huggingface_hub.cached_download = huggingface_hub.hf_hub_download
 
 import mindspore as ms
@@ -23,22 +27,16 @@ ex3_paragraph_complex = "In the event that the Purchaser fails to remit payment 
 ex3_paragraph_simple = "If the buyer doesn't pay the full money in 30 days after getting the invoice, the seller can pause all services and charge a 1.5% monthly fee on the unpaid money. The buyer must pay for any legal fees needed to collect the money."
 
 pipe = pipeline(
-    "text-generation", 
-    model="Qwen/Qwen2-0.5B-Instruct", 
-    dtype=ms.float32  
+    "text-generation",
+    model="Qwen/Qwen2-0.5B-Instruct",
+    dtype=ms.float32
 )
 
 print("CogniBridge is ready!\n")
 
 def cognibridge_simplify(text):
-    """Simplifies text (sentences or paragraphs) using Qwen with dynamic token limits."""
-    
-    # 1. Calculate dynamic tokens based on input length
     word_count = len(text.split())
-    # Give it 2x the input size plus a small 20-token buffer. 
-    # Cap it at 512 just in case you pass an entire book page.
     dynamic_max_tokens = min(int((word_count * 2) + 20), 512)
-    
     prompt = f"""You are an expert at simplifying complex English. Look at these examples of complex text being rewritten into simple text.
 
 Complex: {ex1_complex}
@@ -55,61 +53,119 @@ Complex: {text}
 Simple:"""
 
     result = pipe(
-        prompt, 
-        max_new_tokens=dynamic_max_tokens,  # <--- Using your brilliant dynamic limit!
-        return_full_text=False, 
-        temperature=0.1       
+        prompt,
+        max_new_tokens=dynamic_max_tokens,
+        return_full_text=False,
+        temperature=0.1
     )
 
     raw_output = result[0]["generated_text"].strip()
-    
-    # 2. The Final Failsafe
-    # If the AI tries to start a new example by generating the word "Complex:", 
-    # we immediately chop the string in half and throw away the gibberish.
     clean_output = raw_output.split("Complex:")[0].strip()
-    
     return clean_output
 
 def process_document(input_filename, output_filename):
     """Reads a text file line-by-line, simplifies it, and saves the output."""
-    
-    # 1. Safety check to make sure the file actually exists
     if not os.path.exists(input_filename):
-        print(f"Error: I couldn't find '{input_filename}' in this folder.")
+        print(f"Error: I couldn't find '{input_filename}'.")
         return
 
     print(f"Opening '{input_filename}' for processing...\n")
-    
-    # 2. Open the input file to read, and the output file to write
     with open(input_filename, 'r', encoding='utf-8') as infile, \
          open(output_filename, 'w', encoding='utf-8') as outfile:
-        
-        # 3. Read through the file one line at a time
         for line_number, line in enumerate(infile, 1):
             original_sentence = line.strip()
-            
-            # Skip empty lines so we don't waste the AI's time
             if not original_sentence:
                 continue
-                
             print(f"Simplifying sentence {line_number}...")
-            
-            # 4. Feed the sentence to our AI tool
             simplified = cognibridge_simplify(original_sentence)
-            
-            # 5. Write the results beautifully formatted into the output file
-            outfile.write(f"Original:   {original_sentence}\n")
+            outfile.write(f"Original: {original_sentence}\n")
             outfile.write("-" * 50 + "\n\n")
             outfile.write(f"Simplified: {simplified}\n")
             
-            
     print(f"\nSuccess! All simplified sentences have been saved to '{output_filename}'")
 
-
-# --- How to run the batch processor ---
-if __name__ == "__main__":
-    # Create a simple text file named "complex_text.txt" in your project folder, 
-    # paste some hard sentences in there (one per line), and run this script!
+def run_mindocr_isolated(image_path):
+    """Reaches into the isolated mindocr_env to read text from an image."""
+    print(f"Running MindOCR on '{image_path}'...")
+    mindocr_python_path = "/opt/miniconda3/envs/mindocr_env/bin/python"
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.abspath(os.path.join(script_dir, ".."))
+    predict_script = os.path.join(project_root, "mindocr", "tools", "infer", "text", "predict_system.py")
     
-    process_document("../data/complex_text.txt", "../data/simplified_text.txt")
-    pass
+    command = [
+        mindocr_python_path,
+        predict_script,
+        "--image_dir", image_path,
+        "--det_algorithm", "DB++",
+        "--rec_algorithm", "CRNN"
+    ]
+    
+    subprocess.run(command, cwd=project_root)
+    results_file = os.path.join(project_root, "inference_results", "system_results.txt")
+    extracted_text = ""
+    
+    if os.path.exists(results_file):
+        with open(results_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                parts = line.split('\t')
+                if len(parts) > 1:
+                    raw_json_string = parts[1].strip()
+                    try:
+                        # Parse the JSON array
+                        data = json.loads(raw_json_string)
+                        # Extract just the transcription text from each dictionary in the array
+                        words = [item['transcription'] for item in data]
+                        # Join the words into a single string
+                        extracted_text += " ".join(words) + " "
+                    except json.JSONDecodeError:
+                        # Fallback just in case the output isn't valid JSON for some reason
+                        extracted_text += raw_json_string + " "
+                    
+    return extracted_text.strip()
+
+def process_image(image_path, output_filename):
+    """Extracts text from an image using MindOCR, simplifies it, and saves it."""
+    if not os.path.exists(image_path):
+        print(f"Error: I couldn't find '{image_path}'.")
+        return
+
+    raw_text = run_mindocr_isolated(image_path)
+    if not raw_text:
+        print("No text was found in the image, or OCR failed.")
+        return
+        
+    print(f"\n--- Extracted Text from Image ---\n{raw_text}\n")
+    print("Simplifying with Qwen...")
+    simplified = cognibridge_simplify(raw_text)
+    
+    with open(output_filename, 'w', encoding='utf-8') as outfile:
+        outfile.write(f"Original (From Image): {raw_text}\n")
+        outfile.write("-" * 50 + "\n\n")
+        outfile.write(f"Simplified: {simplified}\n")
+        
+    print(f"\nSuccess! The image text has been simplified and saved to '{output_filename}'")
+
+
+# --- How to run the pipeline ---
+if __name__ == "__main__":
+    # Dynamically find where this script is living
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Setup paths for TEXT processing
+    input_txt = os.path.join(script_dir, "..", "data", "complex_text.txt")
+    output_txt = os.path.join(script_dir, "..", "data", "simplified_text.txt")
+    
+    # Setup paths for IMAGE processing
+    input_img = os.path.join(script_dir, "..", "data", "scan.png")
+    output_img_results = os.path.join(script_dir, "..", "data", "simplified_image.txt")
+    
+    # ---------------------------------------------------------
+    # CHOOSE WHAT TO RUN HERE:
+    # Just comment (#) or uncomment the one you want to test!
+    # ---------------------------------------------------------
+    
+    # Test 1: Process your text document
+    #process_document(input_txt, output_txt)
+    
+    # Test 2: Process your scanned image
+    process_image(input_img, output_img_results)

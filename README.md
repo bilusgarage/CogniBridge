@@ -20,7 +20,7 @@ Before installing, ensure your system has the following:
 * **Python 3.9.11**
 * **Git**
 
-*Note for Evaluators: This project was developed on macOS (Apple Silicon). If you are testing this on Windows or Linux, please refer to the [Official MindSpore Installation Guide](https://www.mindspore.cn/install/en) to ensure you install the correct hardware-specific version of MindSpore for your machine before running the setup commands below. MindSpore version 2.5.0 can be found [here](https://www.mindspore.cn/versions/en/).*
+*Note for Evaluators: This project was developed **entirely** on macOS (Apple Silicon). If you are testing this on Windows or Linux, please refer to the [Official MindSpore Installation Guide](https://www.mindspore.cn/install/en) to ensure you install the correct hardware-specific version of MindSpore for your machine before running the setup commands below. MindSpore version 2.5.0 can be found [here](https://www.mindspore.cn/versions/en/).*
 
 ---
 
