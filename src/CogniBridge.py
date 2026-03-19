@@ -3,7 +3,7 @@ import subprocess
 import huggingface_hub
 import json                 # for parsing the MindOCR JSON output and extracting the transcription values before handing the text over to Qwen
 
-# Our trusty monkey patch
+# Monkey patch, because the default Hugging Face cache directory is not writable in this environment. This will force it to download files directly without caching, which is fine for our use case
 huggingface_hub.cached_download = huggingface_hub.hf_hub_download
 
 import mindspore as ms
@@ -20,11 +20,15 @@ ex1_complex = dataset[0]['complex']
 ex1_simple = dataset[0]['simple']
 ex2_complex = dataset[1]['complex']
 ex2_simple = dataset[1]['simple']
+ex3_complex = dataset[2]['complex']
+ex3_simple = dataset[2]['simple']
+ex4_complex = dataset[3]['complex']
+ex4_simple = dataset[3]['simple']
 
 # 2. Our custom PARAGRAPH example to teach it how to handle long legal text
-ex3_paragraph_complex = "In the event that the Purchaser fails to remit payment in full within the stipulated timeframe of thirty (30) days from the date of invoice issuance, the Vendor reserves the explicit right to suspend all ongoing services and impose a late penalty fee of one and one-half percent (1.5%) per month on the outstanding balance. Furthermore, any subsequent legal costs incurred during the collection process shall be borne entirely by the Purchaser."
+ex4_paragraph_complex = "In the event that the Purchaser fails to remit payment in full within the stipulated timeframe of thirty (30) days from the date of invoice issuance, the Vendor reserves the explicit right to suspend all ongoing services and impose a late penalty fee of one and one-half percent (1.5%) per month on the outstanding balance. Furthermore, any subsequent legal costs incurred during the collection process shall be borne entirely by the Purchaser."
 
-ex3_paragraph_simple = "If the buyer doesn't pay the full money in 30 days after getting the invoice, the seller can pause all services and charge a 1.5% monthly fee on the unpaid money. The buyer must pay for any legal fees needed to collect the money."
+ex4_paragraph_simple = "If the buyer doesn't pay the full money in 30 days after getting the invoice, the seller can pause all services and charge a 1.5% monthly fee on the unpaid money. The buyer must pay for any legal fees needed to collect the money."
 
 pipe = pipeline(
     "text-generation",
@@ -45,10 +49,13 @@ Simple: {ex1_simple}
 Complex: {ex2_complex}
 Simple: {ex2_simple}
 
-Complex: {ex3_paragraph_complex}
-Simple: {ex3_paragraph_simple}
+Complex: {ex3_complex}
+Simple: {ex3_simple}
 
-Now, simplify this text using the same style. ONLY output the simplified text. Do not add any explanations, notes, or extra text.
+Complex: {ex4_paragraph_complex}
+Simple: {ex4_paragraph_simple}
+
+Now, shorten and simplify this text using the simple sentence style. ONLY output the simplified text. Do not add any explanations, notes, or extra text.
 Complex: {text}
 Simple:"""
 

@@ -19,14 +19,26 @@ Before installing, ensure your system has the following:
 * **Conda** (Miniconda or Anaconda)
 * **Python 3.9.11**
 * **Git**
+* **MindSpore 2.5.0 wheel installation package
 
-*Note for Evaluators: This project was developed **entirely** on macOS (Apple Silicon). If you are testing this on Windows or Linux, please refer to the [Official MindSpore Installation Guide](https://www.mindspore.cn/install/en) to ensure you install the correct hardware-specific version of MindSpore for your machine before running the setup commands below. MindSpore version 2.5.0 can be found [here](https://www.mindspore.cn/versions/en/).*
+*Note for Evaluators: This project was developed **entirely** on macOS (Apple Silicon). If you are testing this on Windows or Linux, please get the MindSpore installation `.whl` file for your machine, for Python 3.9 before running the setup commands below. MindSpore version 2.5.0 can be found [here](https://www.mindspore.cn/versions/en/).* 
 
 ---
 
-## 🚀 Installation & Setup
+## 🚀 Installation Guide
 
-### TBA
+1. Clone the CogniBridge repository to your desired location
+
+`git clone https://github.com/bilusgarage/CogniBridge`
+
+2. Download MindSpore 2.5.0 package for your system and Python 3.9
+Example:
+* for Windows x86-64: `mindspore-2.5.0-cp39-cp39-win_amd64.whl`
+* for Linux ARM: `mindspore-2.5.0-cp39-cp39-linux_aarch64.whl` 
+
+2. Move the `mindspore[...].whl` file to the folder `*CogniBridge/mindspore_installation_package/`
+
+3. Launch installation file `install.py`
 
 ## Contributing
 
