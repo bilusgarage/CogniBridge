@@ -27,18 +27,19 @@ Before installing, ensure your system has the following:
 
 ## 🚀 Installation Guide
 
-1. Clone the CogniBridge repository to your desired location
+**1. Clone the CogniBridge repository to your desired location**
 
 `git clone https://github.com/bilusgarage/CogniBridge`
 
-2. Download MindSpore 2.5.0 package for your system and Python 3.9
+**2. Download MindSpore 2.5.0 (Python 3.9) package for your system**
+
 Example:
 * for Windows x86-64: `mindspore-2.5.0-cp39-cp39-win_amd64.whl`
 * for Linux ARM: `mindspore-2.5.0-cp39-cp39-linux_aarch64.whl` 
 
-2. Move the `mindspore[...].whl` file to the folder `*CogniBridge/mindspore_installation_package/`
+**2. Move the `mindspore[...].whl` file to the path `*CogniBridge/mindspore_installation_package/`**
 
-3. Launch installation file `install.py`
+3. Launch installation script `install.py`
 
 ## Contributing
 
