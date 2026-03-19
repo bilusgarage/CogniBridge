@@ -113,12 +113,57 @@ def run_mindocr_isolated(image_path):
                     try:
                         # Parse the JSON array
                         data = json.loads(raw_json_string)
-                        # Extract just the transcription text from each dictionary in the array
-                        words = [item['transcription'] for item in data]
-                        # Join the words into a single string
-                        extracted_text += " ".join(words) + " "
+                        
+                        # 1. Extract coordinates and calculate center Y, min X, and height
+                        processed_boxes = []
+                        for item in data:
+                            points = item['points']
+                            min_x = min(p[0] for p in points)
+                            min_y = min(p[1] for p in points)
+                            max_y = max(p[1] for p in points)
+                            
+                            processed_boxes.append({
+                                'text': item['transcription'],
+                                'min_x': min_x,
+                                'center_y': (min_y + max_y) / 2.0,
+                                'height': max_y - min_y
+                            })
+                            
+                        # 2. Sort all boxes primarily top-to-bottom
+                        processed_boxes.sort(key=lambda b: b['center_y'])
+                        
+                        # 3. Group the boxes into horizontal lines
+                        lines = []
+                        current_line = []
+                        
+                        for box in processed_boxes:
+                            if not current_line:
+                                current_line.append(box)
+                            else:
+                                prev_box = current_line[-1]
+                                # If the vertical distance is less than half the text height, 
+                                # we consider them to be on the same line.
+                                if abs(box['center_y'] - prev_box['center_y']) < max(box['height'], prev_box['height']) * 0.5:
+                                    current_line.append(box)
+                                else:
+                                    lines.append(current_line)
+                                    current_line = [box]
+                                    
+                        if current_line:
+                            lines.append(current_line)
+                            
+                        # 4. Sort each line from left-to-right and combine
+                        ordered_words = []
+                        for line_group in lines:
+                            line_group.sort(key=lambda b: b['min_x'])
+                            for box in line_group:
+                                ordered_words.append(box['text'])
+                                
+                        # Join the final words into a single string
+                        extracted_text += " ".join(ordered_words) + " "
+                        
                     except json.JSONDecodeError:
-                        # Fallback just in case the output isn't valid JSON for some reason
+                        # Fallback just in case the output isn't valid JSON
                         extracted_text += raw_json_string + " "
                     
     return extracted_text.strip()
