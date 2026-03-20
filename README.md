@@ -55,7 +55,7 @@ Example:
 `**#**process_image(input_img, output_img_results)`
 3. Put your text file as `data/complex_text.txt`
 4. `conda activate cogni39`
-5. Run the script
+5. Run `CogniBridge.py`
 6. Check results in `data/simplified_text.txt`
 
 * Simplifying text from a `.png` documentq
@@ -65,7 +65,7 @@ Example:
 `**#**process_document(input_txt, output_txt)`
 3. Put your PNG image file as `data/scan.png`
 4. `conda activate cogni39`
-5. Run the script
+5. Run `CogniBridge.py`
 6. Check results in `data/simplified_image.txt`
 
 ## Contributing

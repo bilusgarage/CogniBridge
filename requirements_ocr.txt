@@ -39,7 +39,6 @@ markdown-it-py==3.0.0
 matplotlib==3.9.4
 mdurl==0.1.2
 mindocr==0.5.0
-mindspore @ file:///Users/bartekbil/Downloads/mindspore-2.5.0-cp39-cp39-macosx_11_0_arm64.whl#sha256=87d460c8e640a72783c5a8b768783660a48e8616de6674bcab43b517e00de01e
 more-itertools==10.8.0
 numpy==2.0.2
 opencv-python-headless==4.13.0.92
