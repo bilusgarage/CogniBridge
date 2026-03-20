@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 
-# Exit immediately if a command exits with a non-zero status, 
-# but we will handle errors manually in the function for better messaging.
+# Exit immediately if a command exits with a non-zero status
 set +e
+
+# ---------------------------------------------------------
+# THE FIX: Automatically navigate to the script's root folder
+# ---------------------------------------------------------
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
+cd "$SCRIPT_DIR" || { echo "❌ ERROR: Failed to navigate to the CogniBridge directory."; exit 1; }
+# ---------------------------------------------------------
 
 # Function to run a command, print status, and handle errors
 run_command() {
-    # The first argument is the description, the rest is the command
     local description="$1"
     shift
     local cmd=("$@")
@@ -17,7 +22,6 @@ run_command() {
     echo "💻 RUNNING: ${cmd[*]}"
     echo "--------------------------------------------------"
     
-    # Execute the command
     if "${cmd[@]}"; then
         echo "✅ SUCCESS: $description"
         echo ""
@@ -28,10 +32,10 @@ run_command() {
     fi
 }
 
-# Ensure the script is being run from the root directory
+# Ensure the script is actually in the repo root
 if [ ! -f "requirements_main.txt" ]; then
     echo "❌ ERROR: Could not find 'requirements_main.txt'."
-    echo "Please run this script from the root of the CogniBridge repository."
+    echo "It looks like install.sh was moved out of the CogniBridge folder."
     exit 1
 fi
 
@@ -60,7 +64,7 @@ run_command "Installing MindSpore 2.5.0 into 'mindocr_env'" \
 
 echo ""
 echo "=================================================="
-echo "INSTALLATION COMPLETE"
+echo "🎉 INSTALLATION COMPLETE 🎉"
 echo "To run the project, activate the main environment using:"
 echo ">conda activate cogni39"
 echo ">python src/CogniBridge.py"
