@@ -1,6 +1,6 @@
 # 🌉 CogniBridge
 
-CogniBridge is an AI-powered text simplification engine designed to translate highly complex English (such as legal, corporate, or academic documents) into plain, accessible language.
+CogniBridge is an AI-powered text simplification engine designed to translate complex English (including but not limited to legal, corporate, or academic documents) into plain, accessible language.
 
 It leverages **MindSpore**, **MindNLP** (powering a local Qwen 2 Instruction model), and **MindOCR** to process both digital text and scanned physical documents.
 
@@ -20,7 +20,6 @@ Before installing, ensure your system has the following:
 Install on Debian through:\
 `wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-aarch64.sh`\
 For other systems: https://www.anaconda.com/docs/getting-started/miniconda/install
-* **Python 3.9.11
 * **Git**
 * **[MindSpore 2.5.0 wheel installation package](https://www.mindspore.cn/versions/en/)**
 
@@ -42,31 +41,31 @@ Example:
 * for Windows x86-64: `mindspore-2.5.0-cp39-cp39-win_amd64.whl`
 * for Linux ARM: `mindspore-2.5.0-cp39-cp39-linux_aarch64.whl` 
 
-**2. Move the `mindspore[...].whl` file to the path `*CogniBridge/mindspore_installation_package/`**
+**2. Move the `mindspore[...].whl` file to the path `CogniBridge/mindspore_installation_package/`**
 
 3. Launch installation script `install.py`
 
 ## 🤔 How to use it?
 
 * Simplifying a `.txt` document
-1. At the end of `src/CogniBridge.py` file uncomment
+	1. At the end of `src/CogniBridge.py` file uncomment
 `process_document(input_txt, output_txt)`
-2. Comment
+	2. Comment
 `**#**process_image(input_img, output_img_results)`
-3. Put your text file as `data/complex_text.txt`
-4. `conda activate cogni39`
-5. Run `CogniBridge.py`
-6. Check results in `data/simplified_text.txt`
+	3. Put your text file as `data/complex_text.txt`
+	4. `conda activate cogni39`
+	5. Run `CogniBridge.py`
+	6. Check results in `data/simplified_text.txt`
 
 * Simplifying text from a `.png` documentq
-1. At the end of `src/CogniBridge.py` file uncomment
+	1. At the end of `src/CogniBridge.py` file uncomment
 `process_image(input_img, output_img_results)`
-2. Comment
+	2. Comment
 `**#**process_document(input_txt, output_txt)`
-3. Put your PNG image file as `data/scan.png`
-4. `conda activate cogni39`
-5. Run `CogniBridge.py`
-6. Check results in `data/simplified_image.txt`
+	3. Put your PNG image file as `data/scan.png`
+	4. `conda activate cogni39`
+	5. Run `CogniBridge.py`
+	6. Check results in `data/simplified_image.txt`
 
 ## Contributing
 
