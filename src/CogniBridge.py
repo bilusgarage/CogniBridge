@@ -1,9 +1,12 @@
 import os
 import subprocess
 import huggingface_hub
-import json                 # for parsing the MindOCR JSON output and extracting the transcription values before handing the text over to Qwen
+import json
+import threading
+import tkinter as tk
+from tkinter import scrolledtext, font
 
-# Monkey patch, because the default Hugging Face cache directory is not writable in this environment. This will force it to download files directly without caching, which is fine for our use case
+# Monkey patch
 huggingface_hub.cached_download = huggingface_hub.hf_hub_download
 
 import mindspore as ms
@@ -13,7 +16,7 @@ from datasets import load_dataset
 
 print("Initializing CogniBridge AI... (Loading dataset and model)")
 
-# 1. Load the dataset for our short sentence examples
+# 1. Load the dataset
 dataset = load_dataset("waboucay/wikilarge", 'original', split="train")
 
 ex1_complex = dataset[0]['complex']
@@ -22,12 +25,9 @@ ex2_complex = dataset[1]['complex']
 ex2_simple = dataset[1]['simple']
 ex3_complex = dataset[2]['complex']
 ex3_simple = dataset[2]['simple']
-ex4_complex = dataset[3]['complex']
-ex4_simple = dataset[3]['simple']
 
-# 2. Our custom PARAGRAPH example to teach it how to handle long legal text
+# 2. Custom PARAGRAPH
 ex4_paragraph_complex = "In the event that the Purchaser fails to remit payment in full within the stipulated timeframe of thirty (30) days from the date of invoice issuance, the Vendor reserves the explicit right to suspend all ongoing services and impose a late penalty fee of one and one-half percent (1.5%) per month on the outstanding balance. Furthermore, any subsequent legal costs incurred during the collection process shall be borne entirely by the Purchaser."
-
 ex4_paragraph_simple = "If the buyer doesn't pay the full money in 30 days after getting the invoice, the seller can pause all services and charge a 1.5% monthly fee on the unpaid money. The buyer must pay for any legal fees needed to collect the money."
 
 pipe = pipeline(
@@ -67,41 +67,16 @@ Simple:"""
     )
 
     raw_output = result[0]["generated_text"].strip()
-    clean_output = raw_output.split("Complex:")[0].strip()
-    return clean_output
-
-def process_document(input_filename, output_filename):
-    """Reads a text file line-by-line, simplifies it, and saves the output."""
-    if not os.path.exists(input_filename):
-        print(f"Error: I couldn't find '{input_filename}'.")
-        return
-
-    print(f"Opening '{input_filename}' for processing...\n")
-    with open(input_filename, 'r', encoding='utf-8') as infile, \
-         open(output_filename, 'w', encoding='utf-8') as outfile:
-        for line_number, line in enumerate(infile, 1):
-            original_sentence = line.strip()
-            if not original_sentence:
-                continue
-            print(f"Simplifying sentence {line_number}...")
-            simplified = cognibridge_simplify(original_sentence)
-            outfile.write(f"Original: {original_sentence}\n")
-            outfile.write("-" * 50 + "\n\n")
-            outfile.write(f"Simplified: {simplified}\n")
-            
-    print(f"\nSuccess! All simplified sentences have been saved to '{output_filename}'")
+    return raw_output.split("Complex:")[0].strip()
 
 def run_mindocr_isolated(image_path):
-    """Reaches into the isolated mindocr_env to read text from an image."""
-    print(f"Running MindOCR on '{image_path}'...")
     mindocr_python_path = "/opt/miniconda3/envs/mindocr_env/bin/python"
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.abspath(os.path.join(script_dir, ".."))
     predict_script = os.path.join(project_root, "mindocr", "tools", "infer", "text", "predict_system.py")
     
     command = [
-        mindocr_python_path,
-        predict_script,
+        mindocr_python_path, predict_script,
         "--image_dir", image_path,
         "--det_algorithm", "DB++",
         "--rec_algorithm", "CRNN"
@@ -118,106 +93,157 @@ def run_mindocr_isolated(image_path):
                 if len(parts) > 1:
                     raw_json_string = parts[1].strip()
                     try:
-                        # Parse the JSON array
                         data = json.loads(raw_json_string)
-                        
-                        # 1. Extract coordinates and calculate center Y, min X, and height
                         processed_boxes = []
                         for item in data:
                             points = item['points']
                             min_x = min(p[0] for p in points)
                             min_y = min(p[1] for p in points)
                             max_y = max(p[1] for p in points)
-                            
                             processed_boxes.append({
                                 'text': item['transcription'],
                                 'min_x': min_x,
                                 'center_y': (min_y + max_y) / 2.0,
                                 'height': max_y - min_y
                             })
-                            
-                        # 2. Sort all boxes primarily top-to-bottom
                         processed_boxes.sort(key=lambda b: b['center_y'])
-                        
-                        # 3. Group the boxes into horizontal lines
                         lines = []
                         current_line = []
-                        
                         for box in processed_boxes:
                             if not current_line:
                                 current_line.append(box)
                             else:
                                 prev_box = current_line[-1]
-                                # If the vertical distance is less than half the text height, 
-                                # we consider them to be on the same line.
                                 if abs(box['center_y'] - prev_box['center_y']) < max(box['height'], prev_box['height']) * 0.5:
                                     current_line.append(box)
                                 else:
                                     lines.append(current_line)
                                     current_line = [box]
-                                    
                         if current_line:
                             lines.append(current_line)
-                            
-                        # 4. Sort each line from left-to-right and combine
                         ordered_words = []
                         for line_group in lines:
                             line_group.sort(key=lambda b: b['min_x'])
                             for box in line_group:
                                 ordered_words.append(box['text'])
-                                
-                        # Join the final words into a single string
                         extracted_text += " ".join(ordered_words) + " "
-                        
                     except json.JSONDecodeError:
-                        # Fallback just in case the output isn't valid JSON
                         extracted_text += raw_json_string + " "
-                    
     return extracted_text.strip()
 
-def process_image(image_path, output_filename):
-    """Extracts text from an image using MindOCR, simplifies it, and saves it."""
-    if not os.path.exists(image_path):
-        print(f"Error: I couldn't find '{image_path}'.")
-        return
 
-    raw_text = run_mindocr_isolated(image_path)
-    if not raw_text:
-        print("No text was found in the image, or OCR failed.")
-        return
+# ==========================================
+# THE GUI APPLICATION
+# ==========================================
+class CogniBridgeApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("CogniBridge AI")
         
-    print(f"\n--- Extracted Text from Image ---\n{raw_text}\n")
-    print("Simplifying with Qwen...")
-    simplified = cognibridge_simplify(raw_text)
-    
-    with open(output_filename, 'w', encoding='utf-8') as outfile:
-        outfile.write(f"Original (From Image): {raw_text}\n")
-        outfile.write("-" * 50 + "\n\n")
-        outfile.write(f"Simplified: {simplified}\n")
+        # Make it fullscreen for the Raspberry Pi display
+        self.root.attributes('-fullscreen', True)
+        self.root.configure(bg="#1e1e2e") # Modern dark background
         
-    print(f"\nSuccess! The image text has been simplified and saved to '{output_filename}'")
+        # Setup paths
+        self.script_dir = os.path.dirname(os.path.abspath(__file__))
+        self.input_txt = os.path.join(self.script_dir, "..", "data", "complex_text.txt")
+        self.input_img = os.path.join(self.script_dir, "..", "data", "scan.png")
 
+        # Fonts
+        self.title_font = font.Font(family="Helvetica", size=24, weight="bold")
+        self.text_font = font.Font(family="Helvetica", size=14)
+        self.btn_font = font.Font(family="Helvetica", size=16, weight="bold")
 
-# --- How to run the pipeline ---
+        self.setup_ui()
+
+    def setup_ui(self):
+        # Header
+        header = tk.Label(self.root, text="🧠 CogniBridge Edge AI", font=self.title_font, bg="#1e1e2e", fg="#cdd6f4", pady=20)
+        header.pack(fill=tk.X)
+
+        # Main Content Frame (Split into left/right)
+        content_frame = tk.Frame(self.root, bg="#1e1e2e")
+        content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+        # Left Column: Original Text
+        left_frame = tk.Frame(content_frame, bg="#1e1e2e")
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10)
+        tk.Label(left_frame, text="Original Input", font=self.btn_font, bg="#1e1e2e", fg="#f38ba8").pack(anchor="w")
+        self.original_box = scrolledtext.ScrolledText(left_frame, font=self.text_font, wrap=tk.WORD, bg="#313244", fg="#cdd6f4", bd=0, padx=10, pady=10)
+        self.original_box.pack(fill=tk.BOTH, expand=True)
+
+        # Right Column: Simplified Output
+        right_frame = tk.Frame(content_frame, bg="#1e1e2e")
+        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=10)
+        tk.Label(right_frame, text="Simplified Output", font=self.btn_font, bg="#1e1e2e", fg="#a6e3a1").pack(anchor="w")
+        self.simplified_box = scrolledtext.ScrolledText(right_frame, font=self.text_font, wrap=tk.WORD, bg="#313244", fg="#cdd6f4", bd=0, padx=10, pady=10)
+        self.simplified_box.pack(fill=tk.BOTH, expand=True)
+
+        # Bottom Buttons
+        btn_frame = tk.Frame(self.root, bg="#1e1e2e", pady=20)
+        btn_frame.pack(fill=tk.X)
+
+        self.btn_text = tk.Button(btn_frame, text="📄 Process Document", font=self.btn_font, bg="#89b4fa", fg="black", command=self.start_text_thread, height=2, width=20)
+        self.btn_text.pack(side=tk.LEFT, expand=True, padx=10)
+
+        self.btn_img = tk.Button(btn_frame, text="👁️ Process Image Scan", font=self.btn_font, bg="#cba6f7", fg="black", command=self.start_image_thread, height=2, width=20)
+        self.btn_img.pack(side=tk.LEFT, expand=True, padx=10)
+
+        self.btn_exit = tk.Button(btn_frame, text="❌ Exit Fullscreen", font=self.btn_font, bg="#f38ba8", fg="black", command=self.root.destroy, height=2, width=15)
+        self.btn_exit.pack(side=tk.RIGHT, expand=True, padx=10)
+
+    # --- Threading to keep UI responsive ---
+    def start_text_thread(self):
+        self.update_boxes("Reading text document...", "Waiting for AI translation...")
+        threading.Thread(target=self.process_document_gui, daemon=True).start()
+
+    def start_image_thread(self):
+        self.update_boxes("Waking up MindOCR vision engine...", "Waiting for AI translation...")
+        threading.Thread(target=self.process_image_gui, daemon=True).start()
+
+    def update_boxes(self, left_text, right_text):
+        """Helper to update text boxes safely."""
+        self.original_box.delete(1.0, tk.END)
+        self.original_box.insert(tk.END, left_text)
+        self.simplified_box.delete(1.0, tk.END)
+        self.simplified_box.insert(tk.END, right_text)
+        self.root.update()
+
+    # --- GUI-Adapted Logic ---
+    def process_document_gui(self):
+        if not os.path.exists(self.input_txt):
+            self.update_boxes("Error", f"Could not find {self.input_txt}")
+            return
+            
+        with open(self.input_txt, 'r', encoding='utf-8') as f:
+            raw_text = f.read().strip()
+            
+        self.update_boxes(raw_text, "Processing with Qwen... Please wait.")
+        simplified = cognibridge_simplify(raw_text)
+        self.update_boxes(raw_text, simplified)
+
+    def process_image_gui(self):
+        if not os.path.exists(self.input_img):
+            self.update_boxes("Error", f"Could not find {self.input_img}")
+            return
+
+        # Phase 1: OCR
+        self.update_boxes("Scanning Image with DB++ & CRNN...\n\nExtracting spatial coordinates...", "Waiting for vision engine...")
+        raw_text = run_mindocr_isolated(self.input_img)
+        
+        if not raw_text:
+            self.update_boxes("Error", "No text found in image or OCR failed.")
+            return
+
+        # Phase 2: NLP
+        self.update_boxes(f"[Extracted from Image]:\n\n{raw_text}", "Translating jargon to simple English...\n\nPlease wait.")
+        simplified = cognibridge_simplify(raw_text)
+        
+        # Final Output
+        self.update_boxes(f"[Extracted from Image]:\n\n{raw_text}", simplified)
+
 if __name__ == "__main__":
-    # Dynamically find where this script is living
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    
-    # Setup paths for TEXT processing
-    input_txt = os.path.join(script_dir, "..", "data", "complex_text.txt")
-    output_txt = os.path.join(script_dir, "..", "data", "simplified_text.txt")
-    
-    # Setup paths for IMAGE processing
-    input_img = os.path.join(script_dir, "..", "data", "scan.png")
-    output_img_results = os.path.join(script_dir, "..", "data", "simplified_image.txt")
-    
-    # ---------------------------------------------------------
-    # CHOOSE WHAT TO RUN HERE:
-    # Just comment (#) or uncomment the one you want to test!
-    # ---------------------------------------------------------
-    
-    # Test 1: Process your text document
-    process_document(input_txt, output_txt)
-    
-    # Test 2: Process your scanned image
-    #process_image(input_img, output_img_results)
+    # The models load FIRST in the terminal, then the UI launches.
+    root = tk.Tk()
+    app = CogniBridgeApp(root)
+    root.mainloop()
