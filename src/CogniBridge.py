@@ -5,6 +5,8 @@ import json
 import threading
 import tkinter as tk
 from tkinter import scrolledtext, font
+import cv2
+from PIL import Image, ImageTk
 
 # Monkey patch
 huggingface_hub.cached_download = huggingface_hub.hf_hub_download
@@ -133,117 +135,148 @@ def run_mindocr_isolated(image_path):
 
 
 # ==========================================
-# THE GUI APPLICATION
+# THE GUI APPLICATION (CAMERA KIOSK MODE)
 # ==========================================
 class CogniBridgeApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("CogniBridge AI")
+        self.root.title("CogniBridge AI Scanner")
         
-        # Make it fullscreen for the Raspberry Pi display
+        # Fullscreen setup for Raspberry Pi
         self.root.attributes('-fullscreen', True)
-        self.root.configure(bg="#1e1e2e") # Modern dark background
+        self.root.configure(bg="#000000") # Black background for camera UI
         
         # Setup paths
         self.script_dir = os.path.dirname(os.path.abspath(__file__))
-        self.input_txt = os.path.join(self.script_dir, "..", "data", "complex_text.txt")
-        self.input_img = os.path.join(self.script_dir, "..", "data", "scan.png")
+        self.photos_dir = os.path.join(self.script_dir, "..", "data", "photos")
+        os.makedirs(self.photos_dir, exist_ok=True) 
+        
+        # State variables
+        self.frozen = False
+        self.current_frame = None
 
         # Fonts
-        self.title_font = font.Font(family="Helvetica", size=24, weight="bold")
-        self.text_font = font.Font(family="Helvetica", size=14)
-        self.btn_font = font.Font(family="Helvetica", size=16, weight="bold")
+        self.btn_font = font.Font(family="Helvetica", size=20, weight="bold")
+        self.text_font = font.Font(family="Helvetica", size=16)
 
+        # Initialize Camera
+        self.cap = cv2.VideoCapture(0)
+        
         self.setup_ui()
+        self.update_video_feed()
 
     def setup_ui(self):
-        # Header
-        header = tk.Label(self.root, text="🧠 CogniBridge Edge AI", font=self.title_font, bg="#1e1e2e", fg="#cdd6f4", pady=20)
-        header.pack(fill=tk.X)
+        # Video Feed Label
+        self.video_label = tk.Label(self.root, bg="#000000")
+        self.video_label.pack(fill=tk.BOTH, expand=True)
 
-        # Main Content Frame (Split into left/right)
-        content_frame = tk.Frame(self.root, bg="#1e1e2e")
-        content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        # Bottom Button Overlay Frame
+        self.btn_frame = tk.Frame(self.root, bg="#000000")
+        self.btn_frame.place(relx=0.5, rely=0.9, anchor=tk.CENTER)
 
-        # Left Column: Original Text
-        left_frame = tk.Frame(content_frame, bg="#1e1e2e")
-        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10)
-        tk.Label(left_frame, text="Original Input", font=self.btn_font, bg="#1e1e2e", fg="#f38ba8").pack(anchor="w")
-        self.original_box = scrolledtext.ScrolledText(left_frame, font=self.text_font, wrap=tk.WORD, bg="#313244", fg="#cdd6f4", bd=0, padx=10, pady=10)
-        self.original_box.pack(fill=tk.BOTH, expand=True)
+        # Scan Button
+        self.btn_scan = tk.Button(self.btn_frame, text="📸 SCAN DOCUMENT", font=self.btn_font, 
+                                  bg="#a6e3a1", fg="black", height=2, width=20, 
+                                  command=self.capture_and_process)
+        self.btn_scan.pack(side=tk.LEFT, padx=20)
 
-        # Right Column: Simplified Output
-        right_frame = tk.Frame(content_frame, bg="#1e1e2e")
-        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=10)
-        tk.Label(right_frame, text="Simplified Output", font=self.btn_font, bg="#1e1e2e", fg="#a6e3a1").pack(anchor="w")
-        self.simplified_box = scrolledtext.ScrolledText(right_frame, font=self.text_font, wrap=tk.WORD, bg="#313244", fg="#cdd6f4", bd=0, padx=10, pady=10)
-        self.simplified_box.pack(fill=tk.BOTH, expand=True)
+        # Exit Button
+        self.btn_exit = tk.Button(self.btn_frame, text="❌ EXIT", font=self.btn_font, 
+                                  bg="#f38ba8", fg="black", height=2, width=10, 
+                                  command=self.on_exit)
+        self.btn_exit.pack(side=tk.LEFT, padx=20)
 
-        # Bottom Buttons
-        btn_frame = tk.Frame(self.root, bg="#1e1e2e", pady=20)
-        btn_frame.pack(fill=tk.X)
+    def update_video_feed(self):
+        """Continuously pulls frames from the camera and updates the UI."""
+        if not self.frozen:
+            ret, frame = self.cap.read()
+            if ret:
+                self.current_frame = frame
+                cv_img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                pil_img = Image.fromarray(cv_img)
+                self.photo = ImageTk.PhotoImage(image=pil_img)
+                self.video_label.config(image=self.photo)
 
-        self.btn_text = tk.Button(btn_frame, text="📄 Process Document", font=self.btn_font, bg="#89b4fa", fg="black", command=self.start_text_thread, height=2, width=20)
-        self.btn_text.pack(side=tk.LEFT, expand=True, padx=10)
+        self.root.after(15, self.update_video_feed)
 
-        self.btn_img = tk.Button(btn_frame, text="👁️ Process Image Scan", font=self.btn_font, bg="#cba6f7", fg="black", command=self.start_image_thread, height=2, width=20)
-        self.btn_img.pack(side=tk.LEFT, expand=True, padx=10)
-
-        self.btn_exit = tk.Button(btn_frame, text="❌ Exit Fullscreen", font=self.btn_font, bg="#f38ba8", fg="black", command=self.root.destroy, height=2, width=15)
-        self.btn_exit.pack(side=tk.RIGHT, expand=True, padx=10)
-
-    # --- Threading to keep UI responsive ---
-    def start_text_thread(self):
-        self.update_boxes("Reading text document...", "Waiting for AI translation...")
-        threading.Thread(target=self.process_document_gui, daemon=True).start()
-
-    def start_image_thread(self):
-        self.update_boxes("Waking up MindOCR vision engine...", "Waiting for AI translation...")
-        threading.Thread(target=self.process_image_gui, daemon=True).start()
-
-    def update_boxes(self, left_text, right_text):
-        """Helper to update text boxes safely."""
-        self.original_box.delete(1.0, tk.END)
-        self.original_box.insert(tk.END, left_text)
-        self.simplified_box.delete(1.0, tk.END)
-        self.simplified_box.insert(tk.END, right_text)
-        self.root.update()
-
-    # --- GUI-Adapted Logic ---
-    def process_document_gui(self):
-        if not os.path.exists(self.input_txt):
-            self.update_boxes("Error", f"Could not find {self.input_txt}")
-            return
+    def capture_and_process(self):
+        """Freezes the screen, saves the image, and starts the AI pipeline thread."""
+        if self.current_frame is not None and not self.frozen:
+            self.frozen = True 
             
-        with open(self.input_txt, 'r', encoding='utf-8') as f:
-            raw_text = f.read().strip()
+            filepath = os.path.join(self.photos_dir, "scan.png")
+            cv2.imwrite(filepath, self.current_frame)
             
-        self.update_boxes(raw_text, "Processing with Qwen... Please wait.")
-        simplified = cognibridge_simplify(raw_text)
-        self.update_boxes(raw_text, simplified)
+            # Phase 1: OCR
+            self.btn_scan.config(text="👁️ READING TEXT...", bg="#f9e2af", state=tk.DISABLED)
+            
+            # Fire off the combined AI pipeline in a background thread
+            threading.Thread(target=self.run_full_pipeline, args=(filepath,), daemon=True).start()
 
-    def process_image_gui(self):
-        if not os.path.exists(self.input_img):
-            self.update_boxes("Error", f"Could not find {self.input_img}")
-            return
-
-        # Phase 1: OCR
-        self.update_boxes("Scanning Image with DB++ & CRNN...\n\nExtracting spatial coordinates...", "Waiting for vision engine...")
-        raw_text = run_mindocr_isolated(self.input_img)
+    def run_full_pipeline(self, filepath):
+        """Runs MindOCR, then feeds the result to Qwen (Running in background thread)."""
+        # Step 1: Extract Text
+        raw_text = run_mindocr_isolated(filepath)
         
         if not raw_text:
-            self.update_boxes("Error", "No text found in image or OCR failed.")
+            # If OCR fails, jump straight to displaying the error
+            self.root.after(0, self.display_results, "", "No text found in the image or OCR failed.")
             return
 
-        # Phase 2: NLP
-        self.update_boxes(f"[Extracted from Image]:\n\n{raw_text}", "Translating jargon to simple English...\n\nPlease wait.")
+        # Step 2: Update UI to show we are switching from Vision to Language
+        self.root.after(0, self.update_button_state, "🧠 SIMPLIFYING...", "#cba6f7")
+        
+        # Step 3: Simplify Text using Qwen
         simplified = cognibridge_simplify(raw_text)
         
-        # Final Output
-        self.update_boxes(f"[Extracted from Image]:\n\n{raw_text}", simplified)
+        # Step 4: Send both results back to the main UI thread to be displayed
+        self.root.after(0, self.display_results, raw_text, simplified)
+
+    def update_button_state(self, text, color):
+        """Helper to safely update the button from a background thread."""
+        self.btn_scan.config(text=text, bg=color)
+
+    def display_results(self, raw_text, simplified_text):
+        """Builds an overlay showing the original text vs the simplified translation."""
+        self.btn_scan.config(text="✅ DONE", bg="#89b4fa")
+
+        # Create a dark overlay frame in the center of the screen
+        self.result_frame = tk.Frame(self.root, bg="#1e1e2e", bd=5, relief=tk.RAISED)
+        self.result_frame.place(relx=0.5, rely=0.45, anchor=tk.CENTER, relwidth=0.85, relheight=0.75)
+
+        # --- Top Section: Original Text ---
+        tk.Label(self.result_frame, text="📄 Original Legal Text:", font=self.btn_font, bg="#1e1e2e", fg="#f38ba8").pack(pady=(15, 5))
+        
+        raw_box = scrolledtext.ScrolledText(self.result_frame, font=self.text_font, wrap=tk.WORD, bg="#313244", fg="#cdd6f4", bd=0, height=5)
+        raw_box.pack(fill=tk.X, padx=20, pady=5)
+        raw_box.insert(tk.END, raw_text if raw_text else "N/A")
+        raw_box.config(state=tk.DISABLED) # Read-only
+
+        # --- Bottom Section: Simplified Translation ---
+        tk.Label(self.result_frame, text="✨ CogniBridge Translation:", font=self.btn_font, bg="#1e1e2e", fg="#a6e3a1").pack(pady=(15, 5))
+        
+        simple_box = scrolledtext.ScrolledText(self.result_frame, font=self.btn_font, wrap=tk.WORD, bg="#313244", fg="#a6e3a1", bd=0, height=6)
+        simple_box.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
+        simple_box.insert(tk.END, simplified_text)
+        simple_box.config(state=tk.DISABLED) # Read-only
+
+        # Reset Button to take another photo
+        btn_reset = tk.Button(self.result_frame, text="🔄 Take Another Photo", font=self.btn_font, bg="#89b4fa", fg="black", command=self.reset_scanner)
+        btn_reset.pack(pady=15)
+
+    def reset_scanner(self):
+        """Destroys the result overlay and unfreezes the camera feed."""
+        self.result_frame.destroy()
+        self.btn_scan.config(text="📸 SCAN DOCUMENT", bg="#a6e3a1", state=tk.NORMAL)
+        self.frozen = False
+
+    def on_exit(self):
+        """Safely release the camera before closing."""
+        if self.cap.isOpened():
+            self.cap.release()
+        self.root.destroy()
 
 if __name__ == "__main__":
-    # The models load FIRST in the terminal, then the UI launches.
     root = tk.Tk()
     app = CogniBridgeApp(root)
     root.mainloop()
