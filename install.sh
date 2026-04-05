@@ -44,7 +44,7 @@ echo ""
 
 # 1. Create the NLP Brain (cogni39)
 run_command "Creating 'cogni39' environment for Text Generation" \
-    conda create -n cogni39 python=3.9.11 -y
+    conda create -n cogni39 python=3.9.11 -c conda-forge -y
 
 # 2. Install requirements into the MindNLP Brain
 run_command "Installing main dependencies into 'cogni39'" \

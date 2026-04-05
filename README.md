@@ -1,8 +1,10 @@
 # 🌉 CogniBridge
 
-CogniBridge is an AI-powered text simplification engine designed to translate complex English (including but not limited to legal, corporate, or academic documents) into plain, accessible language.
+CogniBridge is an AI-powered text simplification engine designed to break down language barriers. Built for Windows, Linux, and macOS, this application translates complex, jargon-heavy English—such as legal contracts, corporate communications, and academic papers—into plain, easily accessible language. Whether you are a professional needing to parse dense documents quickly or a user looking for clear explanations, CogniBridge bridges the gap between complex text and pure comprehension.
 
 It leverages **MindSpore**, **MindNLP** (powering a local Qwen 2 Instruction model), and **MindOCR** to process both digital text and scanned physical documents.
+
+Looking for the mobile version? Check out the [cognibridge-mobile repository](https://github.com/bilusgarage/cognibridge-mobile)
 
 ## 🧠 Architecture
 
@@ -57,7 +59,7 @@ Example:
 	5. Run `CogniBridge.py`
 	6. Check results in `data/simplified_text.txt`
 
-* Simplifying text from a `.png` documentq
+* Simplifying text from a `.png` document
 	1. At the end of `src/CogniBridge.py` file uncomment
 `process_image(input_img, output_img_results)`
 	2. Comment
@@ -71,3 +73,6 @@ Example:
 
 Pull requests are welcome. For major changes, please open an issue first
 to discuss what you would like to change.
+
+Project for Huawei ICT Competition 2026, Innovation Track.
+Made by Bartłomiej Bil, Magdalena Błaszkowska, Weronika Strzyżewska

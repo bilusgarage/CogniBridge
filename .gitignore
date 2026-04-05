@@ -1,0 +1,5 @@
+.DS_Store
+data/*.png
+data/*.jpg
+data/*.txt
+data/photos/*

@@ -4,9 +4,10 @@ import huggingface_hub
 import json
 import threading
 import tkinter as tk
-from tkinter import scrolledtext, font
+from tkinter import font
 import cv2
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageDraw, ImageFont
+import textwrap # NEW: Used for wrapping the text inside the bounding box
 
 # Monkey patch
 huggingface_hub.cached_download = huggingface_hub.hf_hub_download
@@ -72,6 +73,7 @@ Simple:"""
     return raw_output.split("Complex:")[0].strip()
 
 def run_mindocr_isolated(image_path):
+    """Now returns BOTH the text and the global bounding box (min_x, min_y, max_x, max_y)"""
     mindocr_python_path = "/opt/miniconda3/envs/mindocr_env/bin/python"
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.abspath(os.path.join(script_dir, ".."))
@@ -87,6 +89,7 @@ def run_mindocr_isolated(image_path):
     subprocess.run(command, cwd=project_root)
     results_file = os.path.join(project_root, "inference_results", "system_results.txt")
     extracted_text = ""
+    global_bbox = None
     
     if os.path.exists(results_file):
         with open(results_file, 'r', encoding='utf-8') as f:
@@ -97,20 +100,37 @@ def run_mindocr_isolated(image_path):
                     try:
                         data = json.loads(raw_json_string)
                         processed_boxes = []
+                        
+                        # Tracking the absolute outer limits of the text block
+                        g_min_x, g_min_y = float('inf'), float('inf')
+                        g_max_x, g_max_y = 0, 0
+
                         for item in data:
                             points = item['points']
                             min_x = min(p[0] for p in points)
                             min_y = min(p[1] for p in points)
+                            max_x = max(p[0] for p in points)
                             max_y = max(p[1] for p in points)
+                            
+                            # Update global bounds
+                            g_min_x = min(g_min_x, min_x)
+                            g_min_y = min(g_min_y, min_y)
+                            g_max_x = max(g_max_x, max_x)
+                            g_max_y = max(g_max_y, max_y)
+
                             processed_boxes.append({
                                 'text': item['transcription'],
-                                'min_x': min_x,
-                                'center_y': (min_y + max_y) / 2.0,
-                                'height': max_y - min_y
+                                'min_x': min_x, 'center_y': (min_y + max_y) / 2.0, 'height': max_y - min_y
                             })
+                        
+                        # Save the global bounding box
+                        if data:
+                            # Add a 10px padding around the box so it looks nice
+                            global_bbox = (int(g_min_x)-10, int(g_min_y)-10, int(g_max_x)+10, int(g_max_y)+10)
+
+                        # Existing spatial sorting
                         processed_boxes.sort(key=lambda b: b['center_y'])
-                        lines = []
-                        current_line = []
+                        lines, current_line = [], []
                         for box in processed_boxes:
                             if not current_line:
                                 current_line.append(box)
@@ -123,6 +143,7 @@ def run_mindocr_isolated(image_path):
                                     current_line = [box]
                         if current_line:
                             lines.append(current_line)
+                            
                         ordered_words = []
                         for line_group in lines:
                             line_group.sort(key=lambda b: b['min_x'])
@@ -131,63 +152,51 @@ def run_mindocr_isolated(image_path):
                         extracted_text += " ".join(ordered_words) + " "
                     except json.JSONDecodeError:
                         extracted_text += raw_json_string + " "
-    return extracted_text.strip()
+                        
+    return extracted_text.strip(), global_bbox
 
 
 # ==========================================
-# THE GUI APPLICATION (CAMERA KIOSK MODE)
+# THE GUI APPLICATION (AR CAMERA KIOSK)
 # ==========================================
 class CogniBridgeApp:
     def __init__(self, root):
         self.root = root
         self.root.title("CogniBridge AI Scanner")
-        
-        # Fullscreen setup for Raspberry Pi
         self.root.attributes('-fullscreen', True)
-        self.root.configure(bg="#000000") # Black background for camera UI
+        self.root.configure(bg="#000000") 
         
-        # Setup paths
         self.script_dir = os.path.dirname(os.path.abspath(__file__))
         self.photos_dir = os.path.join(self.script_dir, "..", "data", "photos")
         os.makedirs(self.photos_dir, exist_ok=True) 
         
-        # State variables
         self.frozen = False
         self.current_frame = None
 
-        # Fonts
         self.btn_font = font.Font(family="Helvetica", size=20, weight="bold")
-        self.text_font = font.Font(family="Helvetica", size=16)
 
-        # Initialize Camera
         self.cap = cv2.VideoCapture(0)
-        
         self.setup_ui()
         self.update_video_feed()
 
     def setup_ui(self):
-        # Video Feed Label
         self.video_label = tk.Label(self.root, bg="#000000")
         self.video_label.pack(fill=tk.BOTH, expand=True)
 
-        # Bottom Button Overlay Frame
         self.btn_frame = tk.Frame(self.root, bg="#000000")
         self.btn_frame.place(relx=0.5, rely=0.9, anchor=tk.CENTER)
 
-        # Scan Button
-        self.btn_scan = tk.Button(self.btn_frame, text="📸 SCAN DOCUMENT", font=self.btn_font, 
+        self.btn_action = tk.Button(self.btn_frame, text="📸 SCAN DOCUMENT", font=self.btn_font, 
                                   bg="#a6e3a1", fg="black", height=2, width=20, 
-                                  command=self.capture_and_process)
-        self.btn_scan.pack(side=tk.LEFT, padx=20)
+                                  command=self.handle_button_click)
+        self.btn_action.pack(side=tk.LEFT, padx=20)
 
-        # Exit Button
         self.btn_exit = tk.Button(self.btn_frame, text="❌ EXIT", font=self.btn_font, 
                                   bg="#f38ba8", fg="black", height=2, width=10, 
                                   command=self.on_exit)
         self.btn_exit.pack(side=tk.LEFT, padx=20)
 
     def update_video_feed(self):
-        """Continuously pulls frames from the camera and updates the UI."""
         if not self.frozen:
             ret, frame = self.cap.read()
             if ret:
@@ -199,79 +208,79 @@ class CogniBridgeApp:
 
         self.root.after(15, self.update_video_feed)
 
-    def capture_and_process(self):
-        """Freezes the screen, saves the image, and starts the AI pipeline thread."""
-        if self.current_frame is not None and not self.frozen:
+    def handle_button_click(self):
+        """Toggles between scanning a new document and resetting the UI."""
+        if not self.frozen:
+            # We are scanning
             self.frozen = True 
-            
             filepath = os.path.join(self.photos_dir, "scan.png")
             cv2.imwrite(filepath, self.current_frame)
             
-            # Phase 1: OCR
-            self.btn_scan.config(text="👁️ READING TEXT...", bg="#f9e2af", state=tk.DISABLED)
-            
-            # Fire off the combined AI pipeline in a background thread
+            self.btn_action.config(text="👁️ READING TEXT...", bg="#f9e2af", state=tk.DISABLED)
             threading.Thread(target=self.run_full_pipeline, args=(filepath,), daemon=True).start()
+        else:
+            # We are resetting
+            self.frozen = False
+            self.btn_action.config(text="📸 SCAN DOCUMENT", bg="#a6e3a1", state=tk.NORMAL)
 
     def run_full_pipeline(self, filepath):
-        """Runs MindOCR, then feeds the result to Qwen (Running in background thread)."""
-        # Step 1: Extract Text
-        raw_text = run_mindocr_isolated(filepath)
+        # Step 1: Extract Text & Get Bounding Box
+        raw_text, bbox = run_mindocr_isolated(filepath)
         
-        if not raw_text:
-            # If OCR fails, jump straight to displaying the error
-            self.root.after(0, self.display_results, "", "No text found in the image or OCR failed.")
+        if not raw_text or not bbox:
+            self.root.after(0, self.update_button_state, "❌ NO TEXT FOUND - TAP TO RESET", "#f38ba8", tk.NORMAL)
             return
 
-        # Step 2: Update UI to show we are switching from Vision to Language
-        self.root.after(0, self.update_button_state, "🧠 SIMPLIFYING...", "#cba6f7")
-        
-        # Step 3: Simplify Text using Qwen
+        # Step 2: Simplify
+        self.root.after(0, self.update_button_state, "🧠 SIMPLIFYING...", "#cba6f7", tk.DISABLED)
         simplified = cognibridge_simplify(raw_text)
         
-        # Step 4: Send both results back to the main UI thread to be displayed
-        self.root.after(0, self.display_results, raw_text, simplified)
+        # Step 3: Draw the AR Overlay
+        self.root.after(0, self.draw_ar_overlay, filepath, simplified, bbox)
 
-    def update_button_state(self, text, color):
-        """Helper to safely update the button from a background thread."""
-        self.btn_scan.config(text=text, bg=color)
+    def update_button_state(self, text, color, state):
+        self.btn_action.config(text=text, bg=color, state=state)
 
-    def display_results(self, raw_text, simplified_text):
-        """Builds an overlay showing the original text vs the simplified translation."""
-        self.btn_scan.config(text="✅ DONE", bg="#89b4fa")
+    def draw_ar_overlay(self, filepath, simplified_text, bbox):
+        """Modifies the photo to paint the simplified text over the complex text."""
+        # Load the frozen photo in RGBA (so we can do transparent overlays)
+        img = Image.open(filepath).convert("RGBA")
+        overlay = Image.new('RGBA', img.size, (255, 255, 255, 0))
+        draw = ImageDraw.Draw(overlay)
 
-        # Create a dark overlay frame in the center of the screen
-        self.result_frame = tk.Frame(self.root, bg="#1e1e2e", bd=5, relief=tk.RAISED)
-        self.result_frame.place(relx=0.5, rely=0.45, anchor=tk.CENTER, relwidth=0.85, relheight=0.75)
+        x1, y1, x2, y2 = bbox
+        box_width = x2 - x1
 
-        # --- Top Section: Original Text ---
-        tk.Label(self.result_frame, text="📄 Original Legal Text:", font=self.btn_font, bg="#1e1e2e", fg="#f38ba8").pack(pady=(15, 5))
+        # 1. Draw a dark, semi-transparent box over the original text
+        draw.rectangle(((x1, y1), (x2, y2)), fill=(30, 30, 46, 220)) # Dark slate background
+
+        # 2. Try to load a nice font, fallback to default if on Pi
+        try:
+            # This is the default path for a nice font on Debian/Raspberry Pi
+            font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+            ar_font = ImageFont.truetype(font_path, 20)
+        except IOError:
+            ar_font = ImageFont.load_default()
+
+        # 3. Calculate how to wrap the text so it fits inside the box width
+        # A rough heuristic: average char width is about 10-12 pixels at size 20
+        chars_per_line = max(15, box_width // 11) 
+        wrapped_text = textwrap.fill(simplified_text, width=chars_per_line)
+
+        # 4. Draw the simplified text in bright green over the dark box
+        draw.multiline_text((x1 + 10, y1 + 10), wrapped_text, fill=(166, 227, 161, 255), font=ar_font, spacing=4)
+
+        # Combine the original image with the AR overlay
+        final_img = Image.alpha_composite(img, overlay).convert("RGB")
         
-        raw_box = scrolledtext.ScrolledText(self.result_frame, font=self.text_font, wrap=tk.WORD, bg="#313244", fg="#cdd6f4", bd=0, height=5)
-        raw_box.pack(fill=tk.X, padx=20, pady=5)
-        raw_box.insert(tk.END, raw_text if raw_text else "N/A")
-        raw_box.config(state=tk.DISABLED) # Read-only
+        # Update the UI
+        self.photo = ImageTk.PhotoImage(image=final_img)
+        self.video_label.config(image=self.photo)
 
-        # --- Bottom Section: Simplified Translation ---
-        tk.Label(self.result_frame, text="✨ CogniBridge Translation:", font=self.btn_font, bg="#1e1e2e", fg="#a6e3a1").pack(pady=(15, 5))
-        
-        simple_box = scrolledtext.ScrolledText(self.result_frame, font=self.btn_font, wrap=tk.WORD, bg="#313244", fg="#a6e3a1", bd=0, height=6)
-        simple_box.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
-        simple_box.insert(tk.END, simplified_text)
-        simple_box.config(state=tk.DISABLED) # Read-only
-
-        # Reset Button to take another photo
-        btn_reset = tk.Button(self.result_frame, text="🔄 Take Another Photo", font=self.btn_font, bg="#89b4fa", fg="black", command=self.reset_scanner)
-        btn_reset.pack(pady=15)
-
-    def reset_scanner(self):
-        """Destroys the result overlay and unfreezes the camera feed."""
-        self.result_frame.destroy()
-        self.btn_scan.config(text="📸 SCAN DOCUMENT", bg="#a6e3a1", state=tk.NORMAL)
-        self.frozen = False
+        # Change button to allow resetting
+        self.btn_action.config(text="🔄 TAP TO RESET", bg="#89b4fa", state=tk.NORMAL)
 
     def on_exit(self):
-        """Safely release the camera before closing."""
         if self.cap.isOpened():
             self.cap.release()
         self.root.destroy()
