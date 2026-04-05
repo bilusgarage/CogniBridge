@@ -54,7 +54,7 @@ run_command "Installing main dependencies into 'cogni39'" \
 
 # 3. Create the Vision Brain (mindocr_env)
 run_command "Creating 'mindocr_env' environment for Optical Character Recognition" \
-    conda create -n mindocr_env python=3.9.11 -y
+    conda create -n mindocr_env -c conda-forge python=3.9.11 -y
 
 # 4. Install requirements into the Vision Brain
 run_command "Installing OCR dependencies into 'mindocr_env'" \
