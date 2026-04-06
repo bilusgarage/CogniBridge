@@ -21,13 +21,14 @@ Before installing, ensure your system has the following:
 * **Conda** (Miniconda suggested)\
 Install on Debian through:\
 `wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-aarch64.sh`\
+`bash Miniconda*.sh`\
 For other systems: https://www.anaconda.com/docs/getting-started/miniconda/install
 * **Git**
 * **[MindSpore 2.5.0 wheel installation package](https://www.mindspore.cn/versions/en/)**
 
 Tested on:
 * macOS 26 (ARM64)
-* Debian 13 (ARM64)
+* Raspberry Pi OS (Debian 13 Trixie/ARM64)
 
 ---
 
