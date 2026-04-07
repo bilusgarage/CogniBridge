@@ -208,7 +208,12 @@ class CogniBridgeApp:
         self.sentences = []
         self.current_sentence_index = 0
         self.is_playing = False
-        # (Removed self.playback_active)
+        self.current_filepath = None  # NEW: Remembers the photo
+        self.current_bbox = None      # NEW: Remembers where to draw
+
+        # --- NEW: Thread Safety Variables ---
+        self.tts_lock = threading.Lock()
+        self.play_generation = 0
 
         self.btn_font = font.Font(family="Helvetica", size=20, weight="bold")
         self.text_font = font.Font(family="Helvetica", size=16)
@@ -224,6 +229,7 @@ class CogniBridgeApp:
             self.current_sentence_index -= 1
             print(f"\n◀️ REWIND TO SENTENCE {self.current_sentence_index}:")
             print(self.sentences[self.current_sentence_index])
+            self.root.after(0, self.update_ar_overlay) # NEW
 
     def on_media_play_pause(self):
         if not self.sentences:
@@ -233,23 +239,26 @@ class CogniBridgeApp:
             self.current_sentence_index = 0
             
         self.is_playing = not self.is_playing
+        self.play_generation += 1 # NEW: Invalidate old threads
         
         if self.is_playing:
             self.btn_play_pause.config(text="⏸️")
             print(f"\n▶️ RESUMING AT SENTENCE {self.current_sentence_index}:")
             print(self.sentences[self.current_sentence_index])
             
-            # START A FRESH THREAD EVERY TIME YOU HIT PLAY
-            threading.Thread(target=self.audio_playback_loop, daemon=True).start()
+            # NEW: Pass the generation to the thread
+            threading.Thread(target=self.audio_playback_loop, args=(self.play_generation,), daemon=True).start()
         else:
             self.btn_play_pause.config(text="▶️")
             print("\n⏸️ PAUSED PLAYBACK")
+            self.root.after(0, self.update_ar_overlay)
 
     def on_media_fast_forward(self):
         if self.sentences and self.current_sentence_index < len(self.sentences) - 1:
             self.current_sentence_index += 1
             print(f"\n⏩ SKIPPED TO SENTENCE {self.current_sentence_index}:")
             print(self.sentences[self.current_sentence_index])
+            self.root.after(0, self.update_ar_overlay) # NEW``
 
     def init_tts_engine(self):
         """Sets up the TTS engine, loads available voices, and pre-selects an English one."""
@@ -373,6 +382,7 @@ class CogniBridgeApp:
             self.btn_action.config(text="📸 SCAN DOCUMENT", bg="#a6e3a1", state=tk.NORMAL)
             # Safely shut down the background audio loop
             self.is_playing = False
+            self.play_generation += 1 # NEW: Invalidate the current thread
 
     def run_full_pipeline(self, filepath):
         raw_text, bbox = run_mindocr_isolated(filepath)
@@ -386,63 +396,68 @@ class CogniBridgeApp:
         
         # Shut down any previous audio loop
         self.is_playing = False
+        self.play_generation += 1 # NEW: Kill old threads
         time.sleep(0.2) 
         
         # Reset trackers for the new document
         self.sentences = split_into_sentences(simplified)
         self.current_sentence_index = 0
         self.is_playing = True
+        self.play_generation += 1 # NEW: Start fresh generation
         
-        self.root.after(0, self.draw_ar_overlay, filepath, simplified, bbox)
+        self.current_filepath = filepath
+        self.current_bbox = bbox
+        self.root.after(0, self.update_ar_overlay)
         
-        # Start the background playback loop
-        threading.Thread(target=self.audio_playback_loop, daemon=True).start()
+        # NEW: Pass the generation to the thread
+        threading.Thread(target=self.audio_playback_loop, args=(self.play_generation,), daemon=True).start()
 
-    def audio_playback_loop(self):
-        # Create a fresh thread-local TTS engine for this specific playback session.
-        # This completely bypasses the macOS background runloop crash.
-        local_tts = pyttsx3.init()
-        local_tts.setProperty('rate', 160)
-        local_tts.setProperty('voice', self.tts_engine.getProperty('voice'))
+    def audio_playback_loop(self, generation):
+        with self.tts_lock:
+            # If generation changed while waiting for the lock, abort immediately
+            if self.play_generation != generation:
+                return
 
-        # Run continuously ONLY as long as the user hasn't pressed pause
-        while self.is_playing and self.current_sentence_index < len(self.sentences):
-            speaking_index = self.current_sentence_index
-            sentence = self.sentences[speaking_index]
-            
-            # Speak the sentence
-            local_tts.say(sentence)
-            local_tts.runAndWait()
-            
-            # Check if we should advance to the next sentence
-            if self.current_sentence_index == speaking_index:
-                if self.is_playing:
-                    # User didn't pause, move to the next sentence naturally
-                    self.current_sentence_index += 1
-                else:
-                    # User pressed pause while it was reading! 
-                    # Do NOT increment the index. Break the loop so the thread dies.
-                    # When they hit Play again, it will repeat this same sentence.
-                    break
-            
-        # If we exited the loop because we naturally reached the end of the document
-        if self.current_sentence_index >= len(self.sentences) and self.is_playing:
-            self.is_playing = False
-            self.root.after(0, lambda: self.btn_play_pause.config(text="▶️"))
+            local_tts = pyttsx3.init()
+            local_tts.setProperty('rate', 160)
+            local_tts.setProperty('voice', self.tts_engine.getProperty('voice'))
+
+            # Check that is_playing is True AND the generation hasn't been overwritten
+            while self.is_playing and self.play_generation == generation and self.current_sentence_index < len(self.sentences):
+                speaking_index = self.current_sentence_index
+                sentence = self.sentences[speaking_index]
+                
+                self.root.after(0, self.update_ar_overlay)
+                
+                local_tts.say(sentence)
+                local_tts.runAndWait()
+                
+                if self.current_sentence_index == speaking_index:
+                    # Only proceed if still playing and generation matches
+                    if self.is_playing and self.play_generation == generation:
+                        self.current_sentence_index += 1
+                    else:
+                        break
+                
+            # Clean up the UI button state if it naturally finished the document
+            if self.current_sentence_index >= len(self.sentences) and self.is_playing and self.play_generation == generation:
+                self.is_playing = False
+                self.root.after(0, lambda: self.btn_play_pause.config(text="▶️"))
 
     def update_button_state(self, text, color, state):
         self.btn_action.config(text=text, bg=color, state=state)
 
-    def draw_ar_overlay(self, filepath, simplified_text, bbox):
-        # 3. FIXED: Image is pulled raw with no resizing applied, matching the exact OCR math
-        img = Image.open(filepath).convert("RGBA")
+    def update_ar_overlay(self):
+        """Redraws the AR overlay, highlighting the current sentence."""
+        if not self.current_filepath or not self.current_bbox or not self.sentences:
+            return
+
+        img = Image.open(self.current_filepath).convert("RGBA")
         overlay = Image.new('RGBA', img.size, (255, 255, 255, 0))
         draw = ImageDraw.Draw(overlay)
 
-        x1, y1, x2, y2 = bbox
+        x1, y1, x2, y2 = self.current_bbox
         box_width = x2 - x1
-
-        draw.rectangle(((x1, y1), (x2, y2)), fill=(30, 30, 46, 220))
 
         try:
             font_path = get_system_font_path()
@@ -451,9 +466,30 @@ class CogniBridgeApp:
             ar_font = ImageFont.load_default()
 
         chars_per_line = max(15, box_width // 11) 
-        wrapped_text = textwrap.fill(simplified_text, width=chars_per_line)
+        line_height = 26 # Safe spacing for size 20 font
+        
+        # Pre-wrap sentences and calculate the total required height for the dark background
+        total_height = 20 
+        wrapped_sentences = []
+        for sentence in self.sentences:
+            lines = textwrap.wrap(sentence, width=chars_per_line)
+            wrapped_sentences.append(lines)
+            total_height += (len(lines) * line_height) + 8 # +8px gap between sentences
+            
+        # Draw the dynamically sized background box
+        draw.rectangle(((x1, y1), (x2, y1 + total_height)), fill=(30, 30, 46, 220))
 
-        draw.multiline_text((x1 + 10, y1 + 10), wrapped_text, fill=(166, 227, 161, 255), font=ar_font, spacing=4)
+        # Draw the text sentence by sentence
+        cursor_y = y1 + 10
+        for i, lines in enumerate(wrapped_sentences):
+            # Yellow if currently reading, otherwise standard green
+            text_color = (249, 226, 175, 255) if i == self.current_sentence_index else (166, 227, 161, 255)
+            
+            for line in lines:
+                draw.text((x1 + 10, cursor_y), line, fill=text_color, font=ar_font)
+                cursor_y += line_height
+            
+            cursor_y += 8 # Extra visual gap after each sentence
 
         final_img = Image.alpha_composite(img, overlay).convert("RGB")
         self.photo = ImageTk.PhotoImage(image=final_img)

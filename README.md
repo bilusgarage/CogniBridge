@@ -50,25 +50,11 @@ Example:
 
 ## 🤔 How to use it?
 
-* Simplifying a `.txt` document
-	1. At the end of `src/CogniBridge.py` file uncomment
-`process_document(input_txt, output_txt)`
-	2. Comment
-`process_image(input_img, output_img_results)`
-	3. Put your text file as `data/complex_text.txt`
-	4. `conda activate cogni39`
-	5. Run `CogniBridge.py`
-	6. Check results in `data/simplified_text.txt`
-
-* Simplifying text from a `.png` document
-	1. At the end of `src/CogniBridge.py` file uncomment
-`process_image(input_img, output_img_results)`
-	2. Comment
-`process_document(input_txt, output_txt)`
-	3. Put your PNG image file as `data/scan.png`
-	4. `conda activate cogni39`
-	5. Run `CogniBridge.py`
-	6. Check results in `data/simplified_image.txt`
+	1. Launch `src/CogniBridge.py`
+	2. Point your camera at the complex document or text
+	3. Press "Scan document" to take a picture
+	4. Wait
+	5. You will see the simplified text overlayed on top of the photo. CogniBridge will read the text out loud, while highlighting each currently read sentence. You can control the TTS using playback buttons.
 
 ## Contributing
 
