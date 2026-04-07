@@ -209,14 +209,20 @@ class CogniBridgeApp:
             self.current_sentence_index -= 1
 
     def on_play_pause(self):
+        # If the user presses play, but we are already at the end of the text, restart from the beginning
+        if self.current_sentence_index >= len(self.sentences):
+            self.current_sentence_index = 0
+            
         self.is_paused = not self.is_paused
+        
         if self.is_paused:
             self.btn_play_pause.config(text="▶️") # Show Play
         else:
             self.btn_play_pause.config(text="⏸️") # Show Pause
 
     def on_fast_forward(self):
-        if self.current_sentence_index < len(self.sentences) - 1:
+        # Allow fast-forwarding to the very end, which will trigger the auto-pause state
+        if self.current_sentence_index < len(self.sentences):
             self.current_sentence_index += 1
 
     def init_tts_engine(self):
@@ -354,24 +360,30 @@ class CogniBridgeApp:
         threading.Thread(target=self.speak_loop, daemon=True).start()
 
     def speak_loop(self):
-        """Background thread that handles sentence-by-sentence TTS reading."""
-        while self.current_sentence_index < len(self.sentences) and not self.stop_playback:
-            if self.is_paused:
+        """Background thread that stays alive until reset, handling TTS reading."""
+        while not self.stop_playback:
+            # If paused, OR if we've reached the end of the text, just wait/idle here.
+            if self.is_paused or self.current_sentence_index >= len(self.sentences):
+                
+                # Auto-pause the UI when reaching the end of the text naturally
+                if self.current_sentence_index >= len(self.sentences) and not self.is_paused:
+                    self.is_paused = True
+                    self.root.after(0, lambda: self.btn_play_pause.config(text="▶️"))
+                
                 time.sleep(0.1)
                 continue
 
-            # Record the index before we speak
+            # Record index before speaking
             idx_before_speaking = self.current_sentence_index
             
-            # Speak the current sentence (this blocks the thread until the sentence is finished)
+            # Speak the current sentence (Blocks until finished)
             self.tts_engine.say(self.sentences[self.current_sentence_index])
             self.tts_engine.runAndWait()
 
-            # If the user didn't press skip or rewind while it was speaking, move to the next sentence
+            # Move to the next sentence ONLY if the user didn't manually skip/rewind while it was talking
             if not self.stop_playback and not self.is_paused:
                 if self.current_sentence_index == idx_before_speaking:
                     self.current_sentence_index += 1
-
         # Reset UI if playback finishes naturally
         if not self.stop_playback:
             self.root.after(0, lambda: self.btn_play_pause.config(text="▶️"))
