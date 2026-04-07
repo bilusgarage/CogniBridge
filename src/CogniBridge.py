@@ -197,6 +197,18 @@ class CogniBridgeApp:
         self.setup_ui()
         self.update_video_feed()
 
+    def on_media_reverse(self):
+        print("Reverse triggered")
+        # Add your rewind logic here
+
+    def on_media_play_pause(self):
+        print("Play/Pause triggered")
+        # Add your play/pause toggle logic here
+
+    def on_media_fast_forward(self):
+        print("Fast-forward triggered")
+        # Add your skip logic here
+
     def init_tts_engine(self):
         """Sets up the TTS engine, loads available voices, and pre-selects an English one."""
         self.tts_engine = pyttsx3.init()
@@ -218,24 +230,47 @@ class CogniBridgeApp:
         self.video_label = tk.Label(self.root, bg="#000000")
         self.video_label.pack(fill=tk.BOTH, expand=True)
 
-        # Settings Button Overlay
+        # Settings Button Overlay (Top Left)
         self.btn_settings = tk.Button(self.root, text="⚙️", font=font.Font(size=24), 
                                       bg="#1e1e2e", fg="white", bd=0, 
                                       command=self.open_settings)
         self.btn_settings.place(x=20, y=20) 
 
+        # Exit Button Overlay (Top Right)
+        self.btn_exit = tk.Button(self.root, text="❌ EXIT", font=self.btn_font, 
+                                  bg="#f38ba8", fg="black", height=2, width=10, 
+                                  command=self.on_exit)
+        # Using anchor=tk.NE (North-East) to pin the right edge dynamically
+        self.btn_exit.place(relx=1.0, y=20, x=-20, anchor=tk.NE)
+
+        # Main Action Frame (Bottom Center)
         self.btn_frame = tk.Frame(self.root, bg="#000000")
-        self.btn_frame.place(relx=0.5, rely=0.9, anchor=tk.CENTER)
+        self.btn_frame.place(relx=0.5, rely=0.85, anchor=tk.CENTER)
 
         self.btn_action = tk.Button(self.btn_frame, text="📸 SCAN DOCUMENT", font=self.btn_font, 
                                   bg="#a6e3a1", fg="black", height=2, width=20, 
                                   command=self.handle_button_click)
-        self.btn_action.pack(side=tk.LEFT, padx=20)
+        self.btn_action.pack(side=tk.TOP)
 
-        self.btn_exit = tk.Button(self.btn_frame, text="❌ EXIT", font=self.btn_font, 
-                                  bg="#f38ba8", fg="black", height=2, width=10, 
-                                  command=self.on_exit)
-        self.btn_exit.pack(side=tk.LEFT, padx=20)
+        # Media Controls Frame (Just below the action button)
+        self.media_frame = tk.Frame(self.root, bg="#000000")
+        self.media_frame.place(relx=0.5, rely=0.95, anchor=tk.CENTER)
+
+        # Media Buttons
+        self.btn_prev = tk.Button(self.media_frame, text="◀️", font=self.btn_font, 
+                                  bg="#89b4fa", fg="black", width=5, 
+                                  command=self.on_media_reverse)
+        self.btn_prev.pack(side=tk.LEFT, padx=10)
+
+        self.btn_play_pause = tk.Button(self.media_frame, text="⏯️", font=self.btn_font, 
+                                        bg="#89b4fa", fg="black", width=5, 
+                                        command=self.on_media_play_pause)
+        self.btn_play_pause.pack(side=tk.LEFT, padx=10)
+
+        self.btn_next = tk.Button(self.media_frame, text="⏩", font=self.btn_font, 
+                                  bg="#89b4fa", fg="black", width=5, 
+                                  command=self.on_media_fast_forward)
+        self.btn_next.pack(side=tk.LEFT, padx=10)
 
     def open_settings(self):
         """Opens a sleek overlay to change the TTS Voice."""
