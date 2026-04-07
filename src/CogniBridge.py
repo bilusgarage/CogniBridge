@@ -10,7 +10,9 @@ from tkinter import font
 import cv2
 from PIL import Image, ImageTk, ImageDraw, ImageFont
 import textwrap
-import pyttsx3 
+import pyttsx3
+import time
+import re
 
 # Monkey patch
 huggingface_hub.cached_download = huggingface_hub.hf_hub_download
@@ -176,8 +178,7 @@ class CogniBridgeApp:
     def __init__(self, root):
         self.root = root
         self.root.title("CogniBridge AI Scanner")
-        
-        # 1. FIXED: Strictly enforcing Fullscreen like your working code
+
         self.root.attributes('-fullscreen', True)
         self.root.configure(bg="#000000") 
         
@@ -188,6 +189,12 @@ class CogniBridgeApp:
         self.frozen = False
         self.current_frame = None
 
+        # --- NEW: Playback State Variables ---
+        self.sentences = []
+        self.current_sentence_index = 0
+        self.is_paused = False
+        self.stop_playback = False
+
         self.btn_font = font.Font(family="Helvetica", size=20, weight="bold")
         self.text_font = font.Font(family="Helvetica", size=16)
 
@@ -196,29 +203,36 @@ class CogniBridgeApp:
         self.init_tts_engine()
         self.setup_ui()
         self.update_video_feed()
+        
+    def on_rewind(self):
+        if self.current_sentence_index > 0:
+            self.current_sentence_index -= 1
+
+    def on_play_pause(self):
+        self.is_paused = not self.is_paused
+        if self.is_paused:
+            self.btn_play_pause.config(text="▶️") # Show Play
+        else:
+            self.btn_play_pause.config(text="⏸️") # Show Pause
+
+    def on_fast_forward(self):
+        if self.current_sentence_index < len(self.sentences) - 1:
+            self.current_sentence_index += 1
 
     def init_tts_engine(self):
-        """Sets up the TTS engine, loads available voices, and pre-selects an English one."""
         self.tts_engine = pyttsx3.init()
         self.tts_engine.setProperty('rate', 160) 
         
         self.voices = self.tts_engine.getProperty('voices')
-        
         for voice in self.voices:
             if 'en' in voice.id.lower() or 'english' in voice.name.lower() or 'sam' in voice.name.lower():
                 self.tts_engine.setProperty('voice', voice.id)
                 break
-        
-        def on_word(name, location, length):
-            pass 
-            
-        self.tts_engine.connect('onWord', on_word)
 
     def setup_ui(self):
         self.video_label = tk.Label(self.root, bg="#000000")
         self.video_label.pack(fill=tk.BOTH, expand=True)
 
-        # Settings Button Overlay
         self.btn_settings = tk.Button(self.root, text="⚙️", font=font.Font(size=24), 
                                       bg="#1e1e2e", fg="white", bd=0, 
                                       command=self.open_settings)
@@ -237,10 +251,25 @@ class CogniBridgeApp:
                                   command=self.on_exit)
         self.btn_exit.pack(side=tk.LEFT, padx=20)
 
-    def open_settings(self):
-        """Opens a sleek overlay to change the TTS Voice."""
-        self.frozen = True 
+        self.playback_frame = tk.Frame(self.root, bg="#000000")
         
+        self.btn_rewind = tk.Button(self.playback_frame, text="◀️", font=self.btn_font, 
+                                    bg="#89b4fa", fg="black", height=1, width=4, 
+                                    command=self.on_rewind)
+        self.btn_rewind.pack(side=tk.LEFT, padx=10)
+
+        self.btn_play_pause = tk.Button(self.playback_frame, text="⏸️", font=self.btn_font, 
+                                        bg="#f9e2af", fg="black", height=1, width=4, 
+                                        command=self.on_play_pause)
+        self.btn_play_pause.pack(side=tk.LEFT, padx=10)
+
+        self.btn_fast_forward = tk.Button(self.playback_frame, text="⏩", font=self.btn_font, 
+                                          bg="#89b4fa", fg="black", height=1, width=4, 
+                                          command=self.on_fast_forward)
+        self.btn_fast_forward.pack(side=tk.LEFT, padx=10)
+
+    def open_settings(self):
+        self.frozen = True 
         self.settings_frame = tk.Frame(self.root, bg="#1e1e2e", bd=5, relief=tk.RAISED)
         self.settings_frame.place(relx=0.5, rely=0.5, anchor=tk.CENTER, relwidth=0.6, relheight=0.4)
         
@@ -275,9 +304,6 @@ class CogniBridgeApp:
                 self.current_frame = frame
                 cv_img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 pil_img = Image.fromarray(cv_img)
-                
-                # 2. FIXED: Removed all resizing math to match the working AR code exactly
-                
                 self.photo = ImageTk.PhotoImage(image=pil_img)
                 self.video_label.config(image=self.photo)
 
@@ -292,9 +318,12 @@ class CogniBridgeApp:
             self.btn_action.config(text="👁️ READING TEXT...", bg="#f9e2af", state=tk.DISABLED)
             threading.Thread(target=self.run_full_pipeline, args=(filepath,), daemon=True).start()
         else:
+            # --- NEW: Stop playback logic when resetting ---
+            self.stop_playback = True
+            
             self.frozen = False
             self.btn_action.config(text="📸 SCAN DOCUMENT", bg="#a6e3a1", state=tk.NORMAL)
-            self.tts_engine.stop()
+            self.playback_frame.place_forget()
 
     def run_full_pipeline(self, filepath):
         raw_text, bbox = run_mindocr_isolated(filepath)
@@ -307,17 +336,50 @@ class CogniBridgeApp:
         simplified = cognibridge_simplify(raw_text)
         
         self.root.after(0, self.draw_ar_overlay, filepath, simplified, bbox)
-        threading.Thread(target=self.speak_text, args=(simplified,), daemon=True).start()
+        
+        # --- NEW: Call the new start_playback method ---
+        self.start_playback(simplified)
 
-    def speak_text(self, text):
-        self.tts_engine.say(text)
-        self.tts_engine.runAndWait()
+    def start_playback(self, text):
+        # Clean text and split by punctuation (. ! ?)
+        raw_sentences = re.split(r'(?<=[.!?]) +', text.replace('\n', ' '))
+        self.sentences = [s.strip() for s in raw_sentences if s.strip()]
+        
+        self.current_sentence_index = 0
+        self.is_paused = False
+        self.stop_playback = False
+        self.btn_play_pause.config(text="⏸️") # Reset button to pause icon
+
+        # Start background reading loop
+        threading.Thread(target=self.speak_loop, daemon=True).start()
+
+    def speak_loop(self):
+        """Background thread that handles sentence-by-sentence TTS reading."""
+        while self.current_sentence_index < len(self.sentences) and not self.stop_playback:
+            if self.is_paused:
+                time.sleep(0.1)
+                continue
+
+            # Record the index before we speak
+            idx_before_speaking = self.current_sentence_index
+            
+            # Speak the current sentence (this blocks the thread until the sentence is finished)
+            self.tts_engine.say(self.sentences[self.current_sentence_index])
+            self.tts_engine.runAndWait()
+
+            # If the user didn't press skip or rewind while it was speaking, move to the next sentence
+            if not self.stop_playback and not self.is_paused:
+                if self.current_sentence_index == idx_before_speaking:
+                    self.current_sentence_index += 1
+
+        # Reset UI if playback finishes naturally
+        if not self.stop_playback:
+            self.root.after(0, lambda: self.btn_play_pause.config(text="▶️"))
 
     def update_button_state(self, text, color, state):
         self.btn_action.config(text=text, bg=color, state=state)
 
     def draw_ar_overlay(self, filepath, simplified_text, bbox):
-        # 3. FIXED: Image is pulled raw with no resizing applied, matching the exact OCR math
         img = Image.open(filepath).convert("RGBA")
         overlay = Image.new('RGBA', img.size, (255, 255, 255, 0))
         draw = ImageDraw.Draw(overlay)
@@ -343,8 +405,11 @@ class CogniBridgeApp:
         self.video_label.config(image=self.photo)
 
         self.btn_action.config(text="🔄 TAP TO RESET", bg="#89b4fa", state=tk.NORMAL)
+        
+        self.playback_frame.place(relx=0.5, rely=0.78, anchor=tk.CENTER)
 
     def on_exit(self):
+        self.stop_playback = True
         if self.cap.isOpened():
             self.cap.release()
         self.root.destroy()
