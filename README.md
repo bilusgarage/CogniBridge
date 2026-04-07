@@ -50,11 +50,11 @@ Example:
 
 ## 🤔 How to use it?
 
-	1. Launch `src/CogniBridge.py`
-	2. Point your camera at the complex document or text
-	3. Press "Scan document" to take a picture
-	4. Wait
-	5. You will see the simplified text overlayed on top of the photo. CogniBridge will read the text out loud, while highlighting each currently read sentence. You can control the TTS using playback buttons.
+1. Launch `src/CogniBridge.py`
+2. Point your camera at the complex document or text
+3. Press "Scan document" to take a picture
+4. Wait
+5. You will see the simplified text overlayed on top of the photo. CogniBridge will read the text out loud, while highlighting each currently read sentence. You can control the TTS using playback buttons.
 
 ## Contributing
 

@@ -436,6 +436,18 @@ class CogniBridgeApp:
                     # Only proceed if still playing and generation matches
                     if self.is_playing and self.play_generation == generation:
                         self.current_sentence_index += 1
+                        
+                        # --- NEW: 2-Second Responsive Pause ---
+                        # Only pause if there is another sentence coming up
+                        if self.current_sentence_index < len(self.sentences):
+                            slept = 0.0
+                            while slept < 2.0:
+                                # Break out instantly if the user hits pause or scans a new doc
+                                if not self.is_playing or self.play_generation != generation:
+                                    break
+                                time.sleep(0.1)
+                                slept += 0.1
+                                
                     else:
                         break
                 
